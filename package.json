@@ -1,7 +1,7 @@
 {
-  "name": "uni-quindio-dokploy-app",
-  "version": "2.0.0",
-  "description": "Aplicacion de prueba para la practica de Dokploy",
+  "name": "meta-infraestructura-portal",
+  "version": "3.0.0",
+  "description": "Portal institucional de META desplegado con Dokploy",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js"
