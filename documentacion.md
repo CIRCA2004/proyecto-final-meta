@@ -188,3 +188,149 @@ sudo ufw status verbose
 | **Acceso web remoto a CUPS rechazado (`403 Forbidden` / `400 Bad Request`)** | Por defecto CUPS solo escucha en `localhost:631` y rechaza peticiones cuyo encabezado `Host` sea una IP externa. | Se cambió la escucha a `Listen 0.0.0.0:631`, se agregó `ServerAlias *` y se incluyó `Allow all` en las directivas `<Location>` de `/etc/cups/cupsd.conf`. |
 | **Riesgo de bloqueo sobre servicios RPC (NFS/NIS) al activar UFW** | NFS y NIS negocian puertos dinámicos mediante `rpcbind`, por lo que abrir puertos estáticos individuales bloqueaba la comunicación desde clientes VPN y LAN. | Se autorizó el tráfico interno proveniente de los segmentos `192.168.0.0/16` (LAN bridged) y `100.64.0.0/10` (red VPN Tailscale) manteniendo el bloqueo por defecto hacia el exterior. |
 | **Ausencia inicial de `/var/log/monitoreo_meta.log`** | El script de monitoreo escribe en el archivo de alertas únicamente cuando un servicio se encuentra detenido (`else`). | Se documentó el comportamiento esperado: al estar los 4 demonios activos (`[OK]`), el reporte se visualiza en salida estándar y `journalctl`, creándose el log solo ante incidencias reales. |
+
+
+# Documentación Técnica — Servicios Base de Red Linux: NTP, NFS y NIS (META)
+
+**Responsable:** Diana  
+**Sistema Operativo Servidor:** Ubuntu Server 24.04 LTS (`192.168.1.18` / VPN `100.65.203.79`)  
+**Estación Cliente de Pruebas:** Linux Mint (`diana-Lenovo-IdeaPad-S145-14API` / VPN `100.107.52.108`)
+
+---
+
+## 1. Implementación de NTP (Sincronización Horaria)
+
+### 1.1 Instalación y Configuración de Permisos de Red (`/etc/ntpsec/ntp.conf`)
+Se actualizó el índice de paquetes en Ubuntu Server 24.04 e instaló el servicio `ntp` (implementado mediante `ntpsec`). Posteriormente, se añadieron las directivas `restrict` para autorizar consultas de tiempo desde la red local (`192.168.1.0/24`) y la VPN corporativa (`100.64.0.0/10`), bloqueando modificaciones remotas mediante `nomodify notrap`:
+
+```bash
+sudo apt update && sudo apt install ntp -y
+echo "restrict 192.168.1.0 mask 255.255.255.0 nomodify notrap" | sudo tee -a /etc/ntpsec/ntp.conf
+echo "restrict 100.64.0.0 mask 255.192.0.0 nomodify notrap" | sudo tee -a /etc/ntpsec/ntp.conf
+sudo systemctl restart ntpsec
+```
+
+### 1.2 Validación y Sincronización en Servidor y Cliente
+En el servidor se comprobó la sincronización primaria (`*`) con el nodo `0.co.ntp.edgeuno.c` (estrato 2, latencia de `15.63 ms`), estabilizando el reloj central en **estrato 3** (`leap=00`, `rootdisp=298.481 ms`). Desde el cliente Linux Mint se consultó la hora oficial confirmando un desfase (*offset*) de `-0.132436` segundos:
+
+```bash
+# Verificación en servidor Ubuntu
+sudo ntpq -p
+ntpq -c rv | grep -E "leap|stratum|rootdisp"
+
+# Validación desde cliente Linux Mint
+sudo ntpdate -qu 100.65.203.79
+```
+
+* **Evidencias:**  
+  ![Sincronizacion activa en servidor NTP](capturas/ntp_servidor.png)  
+  ![Consulta horaria en estrato 3 desde Linux Mint](capturas/ntp_cliente.png)
+
+---
+
+## 2. Implementación de NFS (Compartición de Archivos en Linux)
+
+### 2.1 Instalación y Configuración del Directorio Compartido
+Se instaló el paquete `nfs-kernel-server` y se creó el directorio colaborativo `/srv/nfs/meta_dev` asignando propiedad a `nobody:nogroup` y permisos de lectura y escritura:
+
+```bash
+sudo apt update && sudo apt install nfs-kernel-server -y
+sudo mkdir -p /srv/nfs/meta_dev
+sudo chown nobody:nogroup /srv/nfs/meta_dev
+sudo chmod 777 /srv/nfs/meta_dev
+```
+
+### 2.2 Declaración de Exportaciones (`/etc/exports`) y Reglas UFW
+Se publicó el recurso compartido hacia ambas subredes corporativas y se aseguraron los puertos `2049` (NFS) y `111` (rpcbind) en el cortafuegos UFW:
+
+```ini
+/srv/nfs/meta_dev 192.168.1.0/24(rw,sync,no_root_squash)
+/srv/nfs/meta_dev 100.64.0.0/10(rw,sync,no_root_squash)
+```
+
+```bash
+sudo exportfs -ra && sudo systemctl restart nfs-kernel-server && sudo exportfs -v
+
+sudo ufw allow from 192.168.1.0/24 to any port 2049
+sudo ufw allow from 192.168.1.0/24 to any port 111
+sudo ufw allow from 100.64.0.0/10 to any port 2049
+sudo ufw allow from 100.64.0.0/10 to any port 111
+```
+
+### 2.3 Montaje y Prueba de Escritura desde Cliente (Linux Mint)
+En la estación cliente se instaló `nfs-common`, se montó el recurso remoto en `/mnt/meta_dev` y se verificó la escritura creando el archivo `prueba_meta.txt`:
+
+```bash
+sudo apt install nfs-common -y
+sudo mkdir -p /mnt/meta_dev
+sudo mount -t nfs 100.65.203.79:/srv/nfs/meta_dev /mnt/meta_dev
+echo "Repositorio compartido Meta - Diana" > /mnt/meta_dev/prueba_meta.txt
+ls -la /mnt/meta_dev && df -h | grep meta_dev
+```
+
+* **Evidencias:**  
+  ![Exportación activa del volumen NFS en servidor](capturas/nfs_servidor.png)  
+  ![Montaje remoto y prueba de escritura en Linux Mint](capturas/nfs_cliente.png)
+
+---
+
+## 3. Implementación de NIS (Autenticación Centralizada)
+
+### 3.1 Instalación y Configuración del Servidor Maestro (`meta.local`)
+Se instaló el paquete `nis` definiendo el dominio corporativo `meta.local` en `/etc/defaultdomain`, se estableció el rol maestro (`NISSERVER=master`) en `/etc/default/nis` y se restringieron las consultas en `/etc/ypserv.securenets`:
+
+```bash
+echo "nis nis/domain string meta.local" | sudo debconf-set-selections
+sudo DEBIAN_FRONTEND=noninteractive apt install nis -y
+echo "meta.local" | sudo tee /etc/defaultdomain && sudo domainname meta.local
+
+sudo sed -i 's/^#*NISSERVER=.*/NISSERVER=master/' /etc/default/nis
+sudo sed -i 's/^#*NISCLIENT=.*/NISCLIENT=false/' /etc/default/nis
+printf "255.0.0.0 127.0.0.0\n255.255.255.0 192.168.1.0\n255.192.0.0 100.64.0.0\n" | sudo tee /etc/ypserv.securenets
+```
+
+### 3.2 Creación de Usuarios Corporativos, Puerto Estático y Compilación de Mapas
+Se creó la cuenta centralizada `meta_user`, se fijó el puerto estático `834` al demonio `ypserv` (`YPSERVARGS="-p 834"`), se compilaron las bases de datos de autenticación y se abrió el puerto `834` en UFW:
+
+```bash
+sudo useradd -m -s /bin/bash meta_user && echo "meta_user:Meta2026*" | sudo chpasswd
+sudo mkdir -p /var/yp/meta.local && hostname | sudo tee /var/yp/ypservers
+
+sudo sed -i 's/^#*YPSERVARGS=.*/YPSERVARGS="-p 834"/' /etc/default/nis
+(grep -q '^YPSERVARGS=' /etc/default/nis || echo 'YPSERVARGS="-p 834"' | sudo tee -a /etc/default/nis)
+
+sudo systemctl restart ypserv && sudo make -C /var/yp
+sudo ufw allow from 192.168.1.0/24 to any port 834
+sudo ufw allow from 100.64.0.0/10 to any port 834
+```
+
+### 3.3 Enlace y Autenticación desde Cliente (Linux Mint)
+En el cliente Linux Mint se instaló `nis`, se configuró `/etc/yp.conf` apuntando al servidor maestro `100.65.203.79`, se añadió la resolución `nis` en `/etc/nsswitch.conf` y se validó el enlace y la resolución del usuario `meta_user`:
+
+```bash
+sudo apt update
+echo "nis nis/domain string meta.local" | sudo debconf-set-selections
+sudo DEBIAN_FRONTEND=noninteractive apt install nis -y
+echo "meta.local" | sudo tee /etc/defaultdomain && sudo domainname meta.local
+echo "domain meta.local server 100.65.203.79" | sudo tee /etc/yp.conf
+(grep -q '^passwd:.*nis' /etc/nsswitch.conf || sudo sed -i -E '/^(passwd|group|shadow):/ s/$/ nis/' /etc/nsswitch.conf)
+
+sudo systemctl restart rpcbind ypbind && sleep 2
+ypwhich
+getent passwd meta_user
+```
+
+* **Evidencias:**  
+  ![Compilación de mapas NIS y puerto 834 en servidor](capturas/nis_servidor.png)  
+  ![Enlace NIS y resolución de meta_user en Linux Mint](capturas/nis_cliente.png)
+
+---
+
+## 4. Solución de Problemas Encontrados
+
+| Problema Identificado | Causa Raíz | Solución Aplicada |
+| :--- | :--- | :--- |
+| **Aislamiento entre clientes en la red inalámbrica local** | El punto de acceso Wi-Fi bloqueaba el tráfico directo entre la estación Linux Mint y la IP local del servidor (`192.168.1.18`). | Se enrutaron los servicios mediante la red VPN Tailscale (`100.65.203.79`, subred `100.64.0.0/10`), autorizando dicho segmento en NTP, NFS, NIS y UFW. |
+| **Error `Failed to stat /srv/nfs/meta_dev` al exportar NFS** | El recurso compartido se declaró en `/etc/exports` antes de crear el directorio físico en el sistema de archivos. | Se creó la ruta con `mkdir -p /srv/nfs/meta_dev`, se asignó propiedad `nobody:nogroup` y se recargó la tabla con `exportfs -ra`. |
+| **Aviso `RPC: Program not registered` al compilar mapas NIS** | Se ejecutó `make -C /var/yp` antes de que el demonio `ypserv` estuviera activo y registrado en `rpcbind`. | Se asignó el puerto estático `834` en `/etc/default/nis`, se reinició `ypserv` y se recompilaron los mapas sin advertencias. |
+| **Error `404 Not Found` al instalar `nis` en Linux Mint** | Los índices locales de paquetes del cliente estaban desactualizados respecto a los repositorios remotos. | Se ejecutó `sudo apt update` previo a la instalación del paquete `nis`. |
