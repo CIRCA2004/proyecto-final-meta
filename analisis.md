@@ -39,3 +39,27 @@ Para garantizar la coherencia temporal, el acceso centralizado a repositorios de
 | **NTP (`ntpsec`)** | `192.168.1.18` (LAN)<br>`100.65.203.79` (VPN) | `123` | UDP | Sincronización Horaria | Servidor de referencia temporal (estrato 3) para estaciones y servicios de red. |
 | **NFS (`nfs-kernel-server`)** | `192.168.1.18` (LAN)<br>`100.65.203.79` (VPN) | `2049`<br>`111` | TCP / UDP | Compartición de Archivos Linux | Exportación nativa del directorio `/srv/nfs/meta_dev` para clientes Linux Mint. |
 | **NIS (`ypserv` / `rpcbind`)** | `192.168.1.18` (LAN)<br>`100.65.203.79` (VPN) | `834`<br>`111` | TCP / UDP | Autenticación Centralizada | Gestión unificada de identidades y credenciales bajo el dominio `meta.local`. |
+
+## 5. Justificación de la Plataforma de Despliegue, Portal y Acceso Seguro
+
+Para centralizar la administración de aplicaciones, mostrar el estado de los servicios corporativos y permitir el acceso remoto seguro a la infraestructura de **META**, se implementaron los siguientes componentes sobre el servidor **Ubuntu Server**:
+
+* **Dokploy:** Proporciona una plataforma centralizada para desplegar, actualizar y supervisar aplicaciones y bases de datos mediante contenedores Docker. El proyecto **META**, organizado en el entorno `production`, integra el portal web, MySQL, PostgreSQL, Redis y los servicios auxiliares desde un mismo panel administrativo.
+* **Portal institucional en Node.js:** Presenta el estado general de la infraestructura, los servicios implementados y sus responsables. La aplicación se ejecuta en el puerto interno `3000` y expone los endpoints `/`, `/api/servicios`, `/health` e `/info` para consulta y validación.
+* **Base de datos MySQL:** Centraliza la información operativa del portal en la base `meta_db`. La tabla `servicios` registra el nombre, responsable, estado, descripción y fecha de cada componente, permitiendo que el contenido se consulte dinámicamente desde la aplicación.
+* **GitHub:** Mantiene el código fuente, la documentación y las evidencias del proyecto bajo control de versiones. Dokploy obtiene la rama `main` del repositorio `CIRCA2004/proyecto-final-meta`, lo cual facilita desplegar cambios de manera controlada y conservar el historial de trabajo del equipo.
+* **Tailscale y MagicDNS:** Crean una red privada entre el servidor y los clientes autorizados sin exponer directamente la máquina virtual a Internet. MagicDNS permite acceder mediante el nombre `ubuntu.tail21829d.ts.net` en lugar de utilizar la dirección IP privada.
+* **HTTPS con Let's Encrypt:** Protege la comunicación entre el navegador y el portal mediante cifrado TLS. El certificado emitido para `ubuntu.tail21829d.ts.net` se cargó en Dokploy y Traefik lo selecciona automáticamente por SNI, garantizando la identidad del servidor dentro de la red Tailscale.
+
+---
+
+## 6. Matriz de Requisitos Técnico-Red (Servicios de Santiago)
+
+| Servicio / Componente | IP o Nombre del Servidor | Puerto(s) | Protocolo | Tipo de Servicio | Descripción Funcional |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Dokploy** | `192.168.1.12` (LAN) | `3000` | TCP / HTTP | Administración de Despliegues | Panel de administración de proyectos, aplicaciones, dominios, certificados y contenedores. |
+| **Portal institucional** | `meta.192-168-1-12.sslip.io` (LAN)<br>`ubuntu.tail21829d.ts.net` (VPN) | `80`<br>`443`<br>Interno: `3000` | HTTP / HTTPS | Aplicación Web | Portal de META y endpoints para consultar servicios y verificar el estado de la aplicación. |
+| **MySQL (`db-meta`)** | Red interna de Docker | `3306` | TCP | Base de Datos | Almacenamiento de los servicios, responsables, estados y descripciones mostrados por el portal. |
+| **Tailscale / MagicDNS** | `100.65.203.79`<br>`ubuntu.tail21829d.ts.net` | Administrado por Tailscale | VPN cifrada | Acceso Privado | Conecta los equipos autorizados y resuelve el nombre privado del servidor. |
+| **TLS / Let's Encrypt** | `ubuntu.tail21829d.ts.net` | `443` | HTTPS / TLS | Seguridad de Transporte | Cifra el acceso al portal y valida la identidad del servidor mediante un certificado público. |
+| **GitHub** | `CIRCA2004/proyecto-final-meta` | `443` | HTTPS / Git | Control de Versiones | Repositorio unificado del código, documentación, diagramas y evidencias del proyecto. |

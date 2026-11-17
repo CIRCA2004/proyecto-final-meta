@@ -334,3 +334,167 @@ getent passwd meta_user
 | **Error `Failed to stat /srv/nfs/meta_dev` al exportar NFS** | El recurso compartido se declaró en `/etc/exports` antes de crear el directorio físico en el sistema de archivos. | Se creó la ruta con `mkdir -p /srv/nfs/meta_dev`, se asignó propiedad `nobody:nogroup` y se recargó la tabla con `exportfs -ra`. |
 | **Aviso `RPC: Program not registered` al compilar mapas NIS** | Se ejecutó `make -C /var/yp` antes de que el demonio `ypserv` estuviera activo y registrado en `rpcbind`. | Se asignó el puerto estático `834` en `/etc/default/nis`, se reinició `ypserv` y se recompilaron los mapas sin advertencias. |
 | **Error `404 Not Found` al instalar `nis` en Linux Mint** | Los índices locales de paquetes del cliente estaban desactualizados respecto a los repositorios remotos. | Se ejecutó `sudo apt update` previo a la instalación del paquete `nis`. |
+
+
+# Documentación Técnica — Dokploy, Portal Institucional, MySQL y HTTPS (META)
+
+**Responsable:** Santiago  
+**Sistema Operativo Servidor:** Ubuntu Server 24.04 LTS (`192.168.1.12` / VPN `100.65.203.79`)  
+**Plataforma de Despliegue:** Dokploy `v0.30.10`
+
+---
+
+## 1. Preparación y Validación del Servidor
+
+Se verificó la disponibilidad de Ubuntu Server, Docker, Dokploy y la conexión privada de Tailscale. El servidor quedó accesible desde la red local mediante `192.168.1.12` y desde la VPN mediante `100.65.203.79`:
+
+```bash
+hostnamectl
+ip -br address
+sudo systemctl status docker --no-pager
+tailscale status
+```
+
+* **Evidencia:**  
+  ![Validación del servidor Ubuntu y sus servicios](capturas/01-servidor.png)
+
+---
+
+## 2. Organización de Servicios en Dokploy
+
+Se creó el proyecto **META** dentro del entorno `production`. Los componentes fueron organizados con los siguientes nombres:
+
+* `multi-service-meta`
+* `redis-cache-meta`
+* `db-postgres-meta`
+* `db-meta`
+* `portal-meta`
+
+Esta estructura permite administrar las aplicaciones, bases de datos y servicios auxiliares desde un único panel, manteniendo cada componente aislado en contenedores Docker.
+
+* **Evidencia:**  
+  ![Servicios del proyecto META en Dokploy](capturas/02-servicios-dokploy.png)
+
+---
+
+## 3. Configuración de MySQL y Registro de Servicios
+
+En el servicio `db-meta` se creó la base de datos `meta_db` y la tabla `servicios`, utilizada por el portal para consultar dinámicamente el estado de la infraestructura:
+
+```sql
+CREATE DATABASE IF NOT EXISTS meta_db;
+USE meta_db;
+
+CREATE TABLE IF NOT EXISTS servicios (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(120) NOT NULL,
+    responsable VARCHAR(100) NOT NULL,
+    estado VARCHAR(30) NOT NULL,
+    descripcion TEXT,
+    fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Se registraron los componentes de Dokploy y portal web, NTP/NFS/NIS, y Samba/CUPS/seguridad con sus respectivos responsables.
+
+* **Evidencia:**  
+  ![Registros de servicios almacenados en MySQL](capturas/03-base-datos.png)
+
+---
+
+## 4. Integración del Portal con GitHub
+
+El portal fue adaptado como sitio institucional de META utilizando Node.js. Los cambios se almacenaron en la rama `main` del repositorio `CIRCA2004/proyecto-final-meta`, permitiendo que Dokploy descargue y despliegue la versión controlada del código:
+
+```bash
+git add .
+git commit -m "Adaptar portal institucional y conectar MySQL de META"
+git push origin main
+```
+
+La aplicación recibe la configuración de MySQL mediante variables de entorno. Los valores sensibles se configuran exclusivamente en Dokploy y no se publican en GitHub:
+
+```env
+NODE_ENV=production
+PORT=3000
+DB_HOST=<host-interno-mysql>
+DB_PORT=3306
+DB_NAME=meta_db
+DB_USER=<usuario-mysql>
+DB_PASSWORD=<contraseña-segura>
+```
+
+* **Evidencia:**  
+  ![Publicación del código del portal en GitHub](capturas/04-git-push.png)
+
+---
+
+## 5. Despliegue y Validación del Portal Institucional
+
+Dokploy descargó el código desde GitHub, construyó la imagen y ejecutó `portal-meta` en el puerto interno `3000`. El sitio muestra la versión `3.0.0`, el estado de la base de datos y los servicios implementados.
+
+* **Evidencia:**  
+  ![Portal institucional de META desplegado](capturas/05-portal.png)
+
+### 5.1 Validación de Endpoints
+
+Se comprobaron los siguientes endpoints:
+
+| Endpoint | Función | Resultado Esperado |
+| :--- | :--- | :--- |
+| `/` | Portal institucional | Página principal de META. |
+| `/api/servicios` | Consulta de servicios | Respuesta JSON con los tres registros de MySQL. |
+| `/health` | Diagnóstico de la aplicación | Estado `saludable`, base de datos `conectada` y versión `3.0.0`. |
+| `/info` | Información del sistema | Datos generales del portal y la plataforma. |
+
+```bash
+curl http://meta.192-168-1-12.sslip.io/api/servicios
+curl http://meta.192-168-1-12.sslip.io/health
+```
+
+* **Evidencia:**  
+  ![Respuesta JSON del endpoint de servicios](capturas/06-api-servicios.png)
+
+---
+
+## 6. Acceso Privado mediante Tailscale y MagicDNS
+
+Se instaló y vinculó Tailscale en el servidor y en el equipo cliente. En la consola de administración se habilitaron **MagicDNS** y **HTTPS Certificates**, obteniendo el nombre privado `ubuntu.tail21829d.ts.net`.
+
+El dominio se añadió a la aplicación `portal-meta` con la ruta `/`, el puerto interno `3000` y HTTPS habilitado. El acceso queda restringido a dispositivos autenticados dentro de la misma red Tailscale.
+
+* **Evidencia:**  
+  ![Dominio Tailscale configurado con HTTPS en Dokploy](capturas/07-dominio-https.png)
+
+---
+
+## 7. Generación e Instalación del Certificado HTTPS
+
+Después de habilitar los certificados en Tailscale, se generaron el certificado y la clave privada para el dominio del servidor:
+
+```bash
+sudo mkdir -p /home/vboxuser/tailscale-cert
+sudo tailscale cert \
+  --cert-file /home/vboxuser/tailscale-cert/ubuntu.crt \
+  --key-file /home/vboxuser/tailscale-cert/ubuntu.key \
+  ubuntu.tail21829d.ts.net
+sudo chmod 600 /home/vboxuser/tailscale-cert/ubuntu.key
+```
+
+El certificado se registró en Dokploy como `meta-tailscale-tls`. Para el dominio se seleccionó el proveedor `None`, permitiendo que Traefik utilice el certificado cargado y lo relacione automáticamente mediante SNI.
+
+Desde el navegador se validó que el certificado fue emitido por **Let's Encrypt (YE1)** para `ubuntu.tail21829d.ts.net` y que su vigencia se extiende hasta el **14 de febrero de 2027**.
+
+* **Evidencia:**  
+  ![Certificado válido de Let's Encrypt presentado por el portal](capturas/08-certificado.png)
+
+---
+
+## 8. Solución de Problemas Encontrados
+
+| Problema Identificado | Causa Raíz | Solución Aplicada |
+| :--- | :--- | :--- |
+| **Dokploy no permitía HTTPS para el dominio `sslip.io`** | El dominio apuntaba a una dirección IP privada y `sslip.io` funciona como resolución pública HTTP, por lo que la emisión automática de certificados no era aplicable. | Se conservó el dominio local para pruebas HTTP y se creó un segundo dominio privado mediante Tailscale y MagicDNS. |
+| **Error `your Tailscale account does not support getting TLS certs`** | La opción **HTTPS Certificates** todavía no estaba habilitada en la cuenta propietaria de la red Tailscale. | Se ingresó con la cuenta propietaria, se habilitaron MagicDNS y HTTPS Certificates y se repitió la generación del certificado. |
+| **Error `DNS_PROBE_FINISHED_NXDOMAIN` al abrir el dominio privado** | El equipo cliente todavía no estaba conectado a la red Tailscale y, por lo tanto, no podía resolver el dominio MagicDNS. | Se instaló e inició Tailscale en el equipo cliente, se vinculó a la misma red y se validó nuevamente el acceso HTTPS. |
+| **El dominio aparecía como `Cert: none` en Dokploy** | El certificado personalizado se selecciona por SNI desde la configuración dinámica de Traefik y no como un solucionador automático de certificados. | Se cargó el certificado en la sección **Certificates**, se habilitó HTTPS y se seleccionó el proveedor `None`, comprobando posteriormente el certificado desde el navegador. |
