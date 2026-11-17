@@ -1,0 +1,2 @@
+0 2 * * * /usr/local/bin/backup_meta.sh
+*/15 * * * * /usr/local/bin/monitoreo_meta.sh > /dev/null
