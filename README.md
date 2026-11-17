@@ -36,7 +36,7 @@ Implementación, aseguramiento y validación de servicios de red, almacenamiento
 ├── Diagrama.mmd               # Diagrama de arquitectura de red y servicios en formato Mermaid
 ├── docker-compose.yml         # Orquestación de contenedores de la plataforma web
 ├── package.json               # Dependencias de la aplicación institucional
-├── src/                       # Código fuente de la aplicación web institucional (Santiago)
+├── src/                       # Código fuente de la aplicación web institucional
 ├── capturas/                  # Evidencias visuales de configuración y validación en servidor y clientes
 └── codigo/                    # Respaldos de configuración y scripts de automatización
     ├── codigo_diana/          # Configuraciones de servicios base Linux (NTP, NFS y NIS)
