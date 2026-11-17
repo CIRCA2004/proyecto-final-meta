@@ -1,0 +1,63 @@
+graph LR
+    subgraph Externos["Servicios Externos"]
+        GH["GitHub Repo<br/>CIRCA2004/dokploy-practica"]
+        LE["Let's Encrypt<br/>SSL ubuntu.tail21829d.ts.net"]
+        POOL["Pool NTP Público<br/>0.co.ntp.edgeuno.c"]
+    end
+
+    subgraph Clientes["Estaciones Cliente META"]
+        C1["Clientes Linux Mint<br/>(Diana: .52.108 / Juan: .86.98.27)"]
+        C2["Clientes Windows / Mac"]
+        C3["Usuarios / Admins Web"]
+    end
+
+    subgraph Red["Conectividad Corporativa"]
+        NET(("Red Bridged 192.168.1.0/24<br/>& VPN Tailscale 100.64.0.0/10"))
+    end
+
+    subgraph Servidor["Servidor Ubuntu 24.04 LTS (100.65.203.79 / 192.168.1.18)"]
+        FW{"Firewall Host UFW<br/>(Deny Incoming / Puertos Autorizados)"}
+
+        subgraph PaaS["Plataforma Dokploy / Traefik (Rol: Santiago)"]
+            WEB["portal-meta & Traefik<br/>(HTTPS 443 / Puerto 3000)"]
+            DB[("Bases de Datos<br/>MySQL meta_db / PostgreSQL / Redis")]
+            WEB --> DB
+        end
+
+        subgraph LinuxCore["Servicios Base Linux (Rol: Diana)"]
+            NTP["Servidor NTP<br/>(123/UDP — Estrato 3)"]
+            NFS["Servidor NFS<br/>(/srv/nfs/meta_dev — 2049,111)"]
+            NIS["Servidor NIS Master<br/>(meta.local — 834,111)"]
+        end
+
+        subgraph SharedSec["Servicios Compartidos y Seguridad (Rol: Juan)"]
+            SAMBA["Servidor Samba<br/>(/srv/samba/meta — 139,445/TCP)"]
+            CUPS["Servidor Impresión CUPS<br/>(Impresora PDF — 631/TCP)"]
+            BACKUP["Automatización Backups<br/>(backup_meta.sh + cron)"]
+            MON["Monitoreo y Logs<br/>(monitoreo_meta.sh + journalctl)"]
+        end
+    end
+
+    GH -->|Deploy Git| WEB
+    LE -->|Certificado TLS| WEB
+    POOL -->|Sincronización| NTP
+
+    C3 -->|HTTPS 443| NET
+    C1 -->|NTP / NFS / NIS / SMB / IPP| NET
+    C2 -->|SMB 445 / IPP 631| NET
+
+    NET --> FW
+
+    FW --> WEB
+    FW --> NTP
+    FW --> NFS
+    FW --> NIS
+    FW --> SAMBA
+    FW --> CUPS
+
+    BACKUP -.->|Respaldo Diario .tar.gz| SAMBA
+    BACKUP -.->|Respaldo Configs| CUPS
+    BACKUP -.->|Respaldo Reglas| FW
+    MON -.->|Auditoría de Estado| SAMBA
+    MON -.->|Auditoría de Estado| CUPS
+    MON -.->|Auditoría de Estado| FW
