@@ -1,66 +1,73 @@
-# Implementación de Dokploy y portal institucional de META
+# Infraestructura TI Corporativa — META Platforms Inc. (Sede Operativa)
 
-## Responsable
+Implementación, aseguramiento y validación de servicios de red, almacenamiento compartido, impresión, automatización y despliegue web sobre un servidor central **Ubuntu Server** con soporte para estaciones cliente **Linux Mint** y **Windows / Mac**.
 
-**Santiago Marín Serna**
+* **Asignatura:** Administración de Infraestructura de TI
+* **Institución:** Universidad del Quindío
+* **Fecha:** Noviembre de 2026
 
-## Descripción
+---
 
-Esta sección documenta la preparación del servidor Ubuntu, la administración de servicios con Dokploy, la integración del portal institucional con MySQL y la publicación privada mediante Tailscale y HTTPS.
+## 1. Equipo y Distribución de Roles
 
-## Preparación y validación del servidor
+| Integrante | Rol en la Arquitectura | Servicios Implementados |
+| :--- | :--- | :--- |
+| **Santiago** | Plataforma PaaS y Aplicaciones Web | Dokploy / Traefik, Aplicación Web Institucional (`HTTPS 443`), Bases de Datos (`MySQL / PostgreSQL`) |
+| **Diana** | Servicios Base de Red Linux | Sincronización Horaria (`NTP 123/UDP`), Almacenamiento Linux (`NFS /srv/nfs/meta_dev`), Autenticación Centralizada (`NIS meta.local - 834`) |
+| **Juan** | Servicios Compartidos, Impresión y Seguridad | Compartición Multiplataforma (`Samba /srv/samba/meta - 139,445/TCP`), Impresión en Red (`CUPS - 631/TCP`), Firewall `UFW`, Backups y Monitoreo (`cron`) |
 
-Se comprobó el funcionamiento del servidor Ubuntu, la conectividad local y privada mediante Tailscale, y la disponibilidad de Docker y Dokploy. El equipo quedó identificado con la dirección local `192.168.1.12` y la dirección privada de Tailscale `100.65.203.79`.
+---
 
-![Estado del servidor](capturas/01-servidor.png)
+## 2. Resumen de Conectividad del Servidor
 
-## Organización de servicios en Dokploy
+* **Sistema Operativo Servidor:** Ubuntu Server
+* **Red Local Bridged (`192.168.1.0/24`):** `192.168.1.18`
+* **Red VPN Tailscale (`100.64.0.0/10`):** `100.65.203.79`
+* **Estaciones Cliente:** Linux Mint y Windows / Mac
 
-Se creó el proyecto **META** en el entorno `production` y se organizaron los servicios `multi-service-meta`, `redis-cache-meta`, `db-postgres-meta`, `db-meta` y `portal-meta`.
+---
 
-![Servicios en Dokploy](capturas/02-servicios-dokploy.png)
+## 3. Estructura del Repositorio
 
-## Configuración de la base de datos MySQL
+```text
+├── README.md                  # Portada y guía general del proyecto
+├── analisis.md                # Justificación técnica de servicios y matriz de puertos/protocolos
+├── documentacion.md           # Guía paso a paso de instalación, pruebas y solución de problemas
+├── Diagrama.mmd               # Diagrama de arquitectura de red y servicios en formato Mermaid
+├── docker-compose.yml         # Orquestación de contenedores de la plataforma web
+├── package.json               # Dependencias de la aplicación institucional
+├── src/                       # Código fuente de la aplicación web institucional (Santiago)
+├── capturas/                  # Evidencias visuales de configuración y validación en servidor y clientes
+└── codigo/                    # Respaldos de configuración y scripts de automatización
+    ├── codigo_diana/          # Configuraciones de servicios base Linux (NTP, NFS y NIS)
+    │   ├── exports            # Directorios exportados por NFS (/etc/exports)
+    │   ├── nis                # Configuración de puerto estático 834 (/etc/default/nis)
+    │   ├── ntp.conf           # Reglas de sincronización y acceso NTP (/etc/ntpsec/ntp.conf)
+    │   └── ypserv.securenets  # Subredes autorizadas para autenticación NIS (/etc/ypserv.securenets)
+    └── codigo_juan/           # Configuraciones y scripts de servicios compartidos y seguridad
+        ├── backup_meta.sh     # Script de copias de seguridad diarias (Samba, CUPS, UFW)
+        ├── crontab_root.txt   # Tareas programadas en cron
+        ├── cupsd.conf         # Configuración del servidor de impresión CUPS
+        ├── monitoreo_meta.sh  # Script de auditoría de servicios y logs
+        ├── smb.conf           # Configuración de recursos compartidos Samba
+        └── ufw_reglas.txt     # Reglas activas del firewall UFW
+```
 
-Se utilizó el servicio `db-meta` y se creó la base de datos `meta_db`. En ella se configuró la tabla `servicios` con los campos `id`, `nombre`, `responsable`, `estado`, `descripcion` y `fecha`. Se registraron los tres componentes principales del proyecto y sus responsables.
+---
 
-![Registros de MySQL](capturas/03-base-datos.png)
+## 4. Navegación Rápida
 
-## Integración con GitHub
+* **[Análisis de Infraestructura (`analisis.md`)](analisis.md):** Justificación operativa de cada servicio y matriz consolidada de red.
+* **[Documentación Técnica (`documentacion.md`)](documentacion.md):** Comandos ejecutados, verificación desde estaciones cliente y registro de incidencias resueltas.
+* **[Diagrama de Arquitectura (`Diagrama.mmd`)](Diagrama.mmd):** Topología completa de red, firewall y servicios por integrante.
 
-El portal fue adaptado como sitio institucional de META, conectado a MySQL mediante variables de entorno y preparado para ejecutarse en el puerto `3000`. Los cambios se publicaron en el repositorio `CIRCA2004/dokploy-practica`, rama `main`, mediante el commit `8a33afa`.
+---
 
-![Publicación en GitHub](capturas/04-git-push.png)
+## Equipo
 
-## Despliegue del portal institucional
+> Proyecto desarrollado como trabajo académico para la asignatura  
+> **Administracion de infraestructura de TI — Universidad del Quindío**  
+> **Santiago Marin Serna, Juan Jose Suarez Moncaleano, Diana Maria Garcia Alzate**    
+> Armenia, Quindío, Colombia · 2026
 
-Dokploy descargó el código desde GitHub, construyó la imagen y desplegó correctamente la aplicación `portal-meta`. El sitio muestra el estado de la infraestructura, la versión `3.0.0` y los servicios consultados desde MySQL.
-
-![Portal institucional](capturas/05-portal.png)
-
-## Validación de la API
-
-Se verificó el endpoint `/api/servicios`, que devolvió los tres servicios almacenados en MySQL. También se comprobó `/health`, obteniendo estado saludable, base de datos conectada y versión `3.0.0`.
-
-![Respuesta de la API](capturas/06-api-servicios.png)
-
-## Acceso privado con Tailscale y HTTPS
-
-Se habilitaron MagicDNS y los certificados HTTPS en la red Tailscale. El certificado para `ubuntu.tail21829d.ts.net` se cargó en Dokploy con el nombre `meta-tailscale-tls` y el dominio se vinculó al portal en el puerto interno `3000`.
-
-![Dominio privado con HTTPS](capturas/07-dominio-https.png)
-
-## Validación final
-
-Desde un equipo conectado a la misma red Tailscale se accedió a `https://ubuntu.tail21829d.ts.net`. El navegador mostró conexión segura y un certificado de Let's Encrypt emitido para el dominio correcto, con vigencia hasta el 14 de febrero de 2027.
-
-![Certificado HTTPS](capturas/08-certificado.png)
-
-## Endpoints disponibles
-
-- `/`: portal institucional de META.
-- `/api/servicios`: listado de servicios almacenados en MySQL.
-- `/health`: estado de la aplicación y conexión con la base de datos.
-- `/info`: información general del portal.
-
-> Por seguridad, este repositorio no incluye contraseñas, claves privadas, certificados ni archivos `.env`.
+*Sistema desarrollado con fines académicos.*
